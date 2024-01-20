@@ -19,11 +19,26 @@
 
 #import <WebKit/WebKit.h>
 #import <Cordova/CDV.h>
+#import "fukCommandQueue.h"
 
 @interface fukWW : CDVPlugin <CDVWebViewEngineProtocol, WKScriptMessageHandler, WKNavigationDelegate>
 
 @property (nonatomic, strong, readonly) id <WKUIDelegate> uiDelegate;
 
 - (void)allowsBackForwardNavigationGestures:(CDVInvokedUrlCommand*)command;
+- (void) initSettings:(NSDictionary*)settings;
+
+
+
+
+//*********** START hieu copy from CDVViewController
+@property (nonatomic, readonly, strong) fukCommandQueue* commandQueue;
+@property (nonatomic, readonly, strong) id <CDVCommandDelegate> commandDelegate;
+//*********** END
+
+
+
+
+
 
 @end

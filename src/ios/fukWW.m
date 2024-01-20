@@ -24,8 +24,25 @@
 
 #import <objc/message.h>
 
+#import "CDVWebViewUIDelegate.h"
+#import <Cordova/CDVWebViewProcessPoolFactory.h>
+#import <Cordova/NSDictionary+CordovaPreferences.h>
+#import <Cordova/CDVURLSchemeHandler.h>
+
+#import <objc/message.h>
+
 #define CDV_BRIDGE_NAME @"cordova"
 #define CDV_WKWEBVIEW_FILE_URL_LOAD_SELECTOR @"loadFileURL:allowingReadAccessToURL:"
+
+
+#define CDV_BRIDGE_NAME @"cordova"
+#define CDV_WKWEBVIEW_FILE_URL_LOAD_SELECTOR @"loadFileURL:allowingReadAccessToURL:"
+
+
+
+#import "fukDelegateImpl.h"
+
+
 
 @interface CDVWKWeakScriptMessageHandler : NSObject <WKScriptMessageHandler>
 
@@ -42,6 +59,9 @@
 @property (nonatomic, strong, readwrite) id <WKUIDelegate> uiDelegate;
 @property (nonatomic, weak) id <WKScriptMessageHandler> weakScriptMessageHandler;
 
+
+
+
 @end
 
 // see forwardingTargetForSelector: selector comment for the reason for this pragma
@@ -49,25 +69,46 @@
 
 @implementation fukWW
 
+
+//*********** START hieu copy from CDVViewController
+@synthesize commandDelegate = _commandDelegate;
+@synthesize commandQueue = _commandQueue;
+//*********** END
+
+
+
+
+
+
+
 @synthesize engineWebView = _engineWebView;
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super init];
     if (self) {
+        
         if (NSClassFromString(@"WKWebView") == nil) {
             return nil;
         }
 
         self.engineWebView = [[WKWebView alloc] initWithFrame:frame];
+        
+        
+        
+        _commandQueue = [[CDVCommandQueue alloc] initWithViewController:self];
+        _commandDelegate = [[fukDelegateImpl alloc] initWithViewController:self];
+        
     }
 
     return self;
 }
 
+
+
 - (WKWebViewConfiguration*) createConfigurationFromSettings:(NSDictionary*)settings
 {
-    WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
+    WKWebViewConfiguration* configuration = [WKWebViewConfiguration new];//[[WKWebViewConfiguration alloc] init];
     configuration.processPool = [[fukPoolFactory sharedFactory] sharedProcessPool];
     if (settings == nil) {
         return configuration;
@@ -82,6 +123,12 @@
 
 - (void)pluginInitialize
 {
+    
+    NSString* webViewEngineClassName =@"fukWW";
+    [self setViewController:self];
+
+    
+    
     // viewController would be available now. we attempt to set all possible delegates to it, by default
     NSDictionary* settings = self.commandDelegate.settings;
 
@@ -91,6 +138,8 @@
 
     WKUserContentController* userContentController = [[WKUserContentController alloc] init];
     [userContentController addScriptMessageHandler:weakScriptMessageHandler name:CDV_BRIDGE_NAME];
+    
+    [userContentController addScriptMessageHandler:self name:@"nativeXHR"];
 
     WKWebViewConfiguration* configuration = [self createConfigurationFromSettings:settings];
     configuration.userContentController = userContentController;
@@ -111,14 +160,21 @@
     if ([self.viewController conformsToProtocol:@protocol(WKNavigationDelegate)]) {
         wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self.viewController;
     } else {
-        wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self;
+       wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self;
     }
 
     if ([self.viewController conformsToProtocol:@protocol(WKScriptMessageHandler)]) {
-        [wkWebView.configuration.userContentController addScriptMessageHandler:(id < WKScriptMessageHandler >)self.viewController name:CDV_BRIDGE_NAME];
+        //[wkWebView.configuration.userContentController addScriptMessageHandler:(id < WKScriptMessageHandler >)self.viewController name:CDV_BRIDGE_NAME];
     }
 
+
     [self updateSettings:settings];
+    
+    
+    [wkWebView.configuration.preferences setValue:@(YES) forKey:@"allowFileAccessFromFileURLs"];
+    [wkWebView.configuration.preferences setValue:@(YES) forKey:@"allowFileAccessFromFileURLs"];
+    [wkWebView.configuration setValue:@(YES) forKey:@"allowUniversalAccessFromFileURLs"];
+    
 
     // check if content thread has died on resume
     NSLog(@"%@", @"CDVWKWebViewEngine will reload WKWebView if required on resume");
@@ -246,6 +302,7 @@ static void * KVOContext = &KVOContext;
      wkWebView.configuration.preferences.javaScriptEnabled = [settings cordovaBoolSettingForKey:@"JavaScriptEnabled" default:YES];
      wkWebView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = [settings cordovaBoolSettingForKey:@"JavaScriptCanOpenWindowsAutomatically" default:NO];
      */
+ 
 
     // By default, DisallowOverscroll is false (thus bounce is allowed)
     BOOL bounceAllowed = !([settings cordovaBoolSettingForKey:@"DisallowOverscroll" defaultValue:NO]);
@@ -415,6 +472,13 @@ static void * KVOContext = &KVOContext;
 
 - (void) webView: (WKWebView *) webView decidePolicyForNavigationAction: (WKNavigationAction*) navigationAction decisionHandler: (void (^)(WKNavigationActionPolicy)) decisionHandler
 {
+    
+    NSLog(@"アクセスURL：%@", navigationAction.request.URL.absoluteString);
+        
+    // どのページも許可
+    return decisionHandler(WKNavigationActionPolicyAllow);
+    
+    
     NSURL* url = [navigationAction.request URL];
     CDVViewController* vc = (CDVViewController*)self.viewController;
 
@@ -488,6 +552,8 @@ static void * KVOContext = &KVOContext;
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
 {
+    NSLog(@"******** %@", [NSString stringWithFormat:@"%@", message.name]);
+    
     [self.scriptMessageHandler userContentController:userContentController didReceiveScriptMessage:message];
 }
 
