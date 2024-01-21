@@ -158,7 +158,7 @@
 
 - (id)getCommandInstance:(NSString*)pluginName
 {
-    //return [_viewController getCommandInstance:pluginName];
+    return [_viewController getCommandInstance:pluginName];
     return nil;
 }
 

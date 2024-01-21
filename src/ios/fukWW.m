@@ -21,28 +21,15 @@
 #import "fukUIDelegate.h"
 #import "fukPoolFactory.h"
 #import <Cordova/NSDictionary+CordovaPreferences.h>
-
-#import <objc/message.h>
-
-#import "CDVWebViewUIDelegate.h"
-#import <Cordova/CDVWebViewProcessPoolFactory.h>
-#import <Cordova/NSDictionary+CordovaPreferences.h>
-#import <Cordova/CDVURLSchemeHandler.h>
-
-#import <objc/message.h>
-
-#define CDV_BRIDGE_NAME @"cordova"
-#define CDV_WKWEBVIEW_FILE_URL_LOAD_SELECTOR @"loadFileURL:allowingReadAccessToURL:"
-
-
-#define CDV_BRIDGE_NAME @"cordova"
-#define CDV_WKWEBVIEW_FILE_URL_LOAD_SELECTOR @"loadFileURL:allowingReadAccessToURL:"
-
-
-
+#import <Cordova/CDVConfigParser.h>
+#import <Cordova/CDVPlugin.h>
+#import "CDVPlugin+Private.h"
 #import "fukDelegateImpl.h"
 
+#import <objc/message.h>
 
+#define CDV_BRIDGE_NAME @"cordova"
+#define CDV_WKWEBVIEW_FILE_URL_LOAD_SELECTOR @"loadFileURL:allowingReadAccessToURL:"
 
 @interface CDVWKWeakScriptMessageHandler : NSObject <WKScriptMessageHandler>
 
@@ -55,12 +42,16 @@
 
 @interface fukWW ()
 
+
+@property (nonatomic, readwrite, strong) NSMutableDictionary* pluginObjects;
+@property (nonatomic, readwrite, strong) NSMutableArray* startupPluginNames;
+@property (nonatomic, readwrite, strong) NSDictionary* pluginsMap;
+@property (nonatomic, readwrite, strong) id <CDVWebViewEngineProtocol> webViewEngine;
+
+
 @property (nonatomic, strong, readwrite) UIView* engineWebView;
 @property (nonatomic, strong, readwrite) id <WKUIDelegate> uiDelegate;
 @property (nonatomic, weak) id <WKScriptMessageHandler> weakScriptMessageHandler;
-
-
-
 
 @end
 
@@ -69,46 +60,32 @@
 
 @implementation fukWW
 
-
-//*********** START hieu copy from CDVViewController
-@synthesize commandDelegate = _commandDelegate;
 @synthesize commandQueue = _commandQueue;
-//*********** END
+@synthesize commandDelegate = _commandDelegate;
 
-
-
-
-
-
-
+@synthesize webViewEngine = _webViewEngine;
 @synthesize engineWebView = _engineWebView;
+
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super init];
     if (self) {
-        
         if (NSClassFromString(@"WKWebView") == nil) {
             return nil;
         }
-
-        self.engineWebView = [[WKWebView alloc] initWithFrame:frame];
-        
-        
-        
+        //self.engineWebView = [[WKWebView alloc] initWithFrame:frame];
         _commandQueue = [[CDVCommandQueue alloc] initWithViewController:self];
         _commandDelegate = [[fukDelegateImpl alloc] initWithViewController:self];
-        
+        [self pluginInitialize:frame];
     }
 
     return self;
 }
 
-
-
 - (WKWebViewConfiguration*) createConfigurationFromSettings:(NSDictionary*)settings
 {
-    WKWebViewConfiguration* configuration = [WKWebViewConfiguration new];//[[WKWebViewConfiguration alloc] init];
+    WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
     configuration.processPool = [[fukPoolFactory sharedFactory] sharedProcessPool];
     if (settings == nil) {
         return configuration;
@@ -121,12 +98,31 @@
     return configuration;
 }
 
-- (void)pluginInitialize
+
+
+
+
+
+
+
+- (void)pluginInitialize:(CGRect)frame
 {
     
-    NSString* webViewEngineClassName =@"fukWW";
-    [self setViewController:self];
+    self.webViewEngine = self;
+    CDVConfigParser* delegate = [[CDVConfigParser alloc] init];
+    // Get the plugin dictionary, allowList and settings from the delegate.
+    self.pluginsMap = delegate.pluginsDict;
+    self.pluginObjects = delegate.pluginsDict;
+    //self.startupPluginNames = delegate.startupPluginNames;
+    //self.settings = delegate.settings;
+    
+    
 
+    
+    
+    
+    
+    
     
     
     // viewController would be available now. we attempt to set all possible delegates to it, by default
@@ -138,14 +134,12 @@
 
     WKUserContentController* userContentController = [[WKUserContentController alloc] init];
     [userContentController addScriptMessageHandler:weakScriptMessageHandler name:CDV_BRIDGE_NAME];
-    
-    [userContentController addScriptMessageHandler:self name:@"nativeXHR"];
 
     WKWebViewConfiguration* configuration = [self createConfigurationFromSettings:settings];
     configuration.userContentController = userContentController;
 
     // re-create WKWebView, since we need to update configuration
-    WKWebView* wkWebView = [[WKWebView alloc] initWithFrame:self.engineWebView.frame configuration:configuration];
+    WKWebView* wkWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
     wkWebView.UIDelegate = self.uiDelegate;
     self.engineWebView = wkWebView;
 
@@ -160,33 +154,117 @@
     if ([self.viewController conformsToProtocol:@protocol(WKNavigationDelegate)]) {
         wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self.viewController;
     } else {
-       wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self;
+        wkWebView.navigationDelegate = (id <WKNavigationDelegate>)self;
     }
 
     if ([self.viewController conformsToProtocol:@protocol(WKScriptMessageHandler)]) {
-        //[wkWebView.configuration.userContentController addScriptMessageHandler:(id < WKScriptMessageHandler >)self.viewController name:CDV_BRIDGE_NAME];
+        [wkWebView.configuration.userContentController addScriptMessageHandler:(id < WKScriptMessageHandler >)self.viewController name:CDV_BRIDGE_NAME];
     }
 
-
     [self updateSettings:settings];
-    
-    
-    [wkWebView.configuration.preferences setValue:@(YES) forKey:@"allowFileAccessFromFileURLs"];
-    [wkWebView.configuration.preferences setValue:@(YES) forKey:@"allowFileAccessFromFileURLs"];
-    [wkWebView.configuration setValue:@(YES) forKey:@"allowUniversalAccessFromFileURLs"];
-    
 
+    /*
     // check if content thread has died on resume
     NSLog(@"%@", @"CDVWKWebViewEngine will reload WKWebView if required on resume");
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(onAppWillEnterForeground:)
                name:UIApplicationWillEnterForegroundNotification object:nil];
+     */
 
     NSLog(@"Using WKWebView");
 
     [self addURLObserver];
+    
+    
+    
+
+    
+    NSString* pluginName =@"CDVWKWebViewFileXhr";
+    [self.pluginsMap setValue:pluginName forKey:[pluginName lowercaseString]];
+    
+    
+    
+    [CDVTimer start:@"TotalPluginStartup"];
+    //for (NSString* pluginName in self.startupPluginNames) {
+    [CDVTimer start:pluginName];
+    [self getCommandInstance:pluginName];
+    [CDVTimer stop:pluginName];
+    //}
+    [CDVTimer stop:@"TotalPluginStartup"];
+    
+    
 }
+
+- (nullable id)getCommandInstance:(NSString*)pluginName
+{
+    // first, we try to find the pluginName in the pluginsMap
+    // (acts as a allowList as well) if it does not exist, we return nil
+    // NOTE: plugin names are matched as lowercase to avoid problems - however, a
+    // possible issue is there can be duplicates possible if you had:
+    // "org.apache.cordova.Foo" and "org.apache.cordova.foo" - only the lower-cased entry will match
+    NSString* className = [self.pluginsMap objectForKey:[pluginName lowercaseString]];
+
+    if (className == nil) {
+        return nil;
+    }
+
+    id obj = [self.pluginObjects objectForKey:className];
+    if (!obj) {
+        obj = [[NSClassFromString(className)alloc] initWithWebViewEngine:_webViewEngine];
+        if (!obj) {
+            NSString* fullClassName = [NSString stringWithFormat:@"%@.%@",
+                                       NSBundle.mainBundle.infoDictionary[@"CFBundleExecutable"],
+                                       className];
+            obj = [[NSClassFromString(fullClassName)alloc] initWithWebViewEngine:_webViewEngine];
+        }
+
+        if (obj != nil) {
+            [self registerPlugin:obj withClassName:className];
+        } else {
+            NSLog(@"CDVPlugin class %@ (pluginName: %@) does not exist.", className, pluginName);
+        }
+    }
+    return obj;
+}
+- (void)registerPlugin:(CDVPlugin*)plugin withClassName:(NSString*)className
+{
+    if ([plugin respondsToSelector:@selector(setViewController:)]) {
+        [plugin setViewController:self];
+    }
+
+    if ([plugin respondsToSelector:@selector(setCommandDelegate:)]) {
+        [plugin setCommandDelegate:_commandDelegate];
+    }
+
+    [self.pluginObjects setObject:plugin forKey:className];
+    [plugin pluginInitialize];
+}
+
+- (void)registerPlugin:(CDVPlugin*)plugin withPluginName:(NSString*)pluginName
+{
+    if ([plugin respondsToSelector:@selector(setViewController:)]) {
+        [plugin setViewController:self];
+    }
+
+    if ([plugin respondsToSelector:@selector(setCommandDelegate:)]) {
+        [plugin setCommandDelegate:_commandDelegate];
+    }
+
+    NSString* className = NSStringFromClass([plugin class]);
+    [self.pluginObjects setObject:plugin forKey:className];
+    [self.pluginsMap setValue:className forKey:[pluginName lowercaseString]];
+    [plugin pluginInitialize];
+}
+
+
+
+
+
+
+
+
+
 
 - (void)onReset {
     [self addURLObserver];
@@ -302,7 +380,6 @@ static void * KVOContext = &KVOContext;
      wkWebView.configuration.preferences.javaScriptEnabled = [settings cordovaBoolSettingForKey:@"JavaScriptEnabled" default:YES];
      wkWebView.configuration.preferences.javaScriptCanOpenWindowsAutomatically = [settings cordovaBoolSettingForKey:@"JavaScriptCanOpenWindowsAutomatically" default:NO];
      */
- 
 
     // By default, DisallowOverscroll is false (thus bounce is allowed)
     BOOL bounceAllowed = !([settings cordovaBoolSettingForKey:@"DisallowOverscroll" defaultValue:NO]);
@@ -391,13 +468,13 @@ static void * KVOContext = &KVOContext;
         return;
     }
 
-    CDVViewController* vc = (CDVViewController*)self.viewController;
+    //CDVViewController* vc = (CDVViewController*)self.viewController;
 
     NSArray* jsonEntry = message.body; // NSString:callbackId, NSString:service, NSString:action, NSArray:args
     CDVInvokedUrlCommand* command = [CDVInvokedUrlCommand commandFromJson:jsonEntry];
     CDV_EXEC_LOG(@"Exec(%@): Calling %@.%@", command.callbackId, command.className, command.methodName);
 
-    if (![vc.commandQueue execute:command]) {
+    if (![self.commandQueue execute:command]) {
 #ifdef DEBUG
         NSError* error = nil;
         NSString* commandJson = nil;
@@ -423,7 +500,7 @@ static void * KVOContext = &KVOContext;
 
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation
 {
-    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginResetNotification object:webView]];
+    //[[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginResetNotification object:webView]];
 }
 
 - (void)webView:(WKWebView*)webView didFinishNavigation:(WKNavigation*)navigation
@@ -431,7 +508,7 @@ static void * KVOContext = &KVOContext;
     CDVViewController* vc = (CDVViewController*)self.viewController;
     //[CDVUserAgentUtil releaseLock:vc.userAgentLockToken];
 
-    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPageDidLoadNotification object:webView]];
+    [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:@"fukPageDidLoadNotification" object:webView]];
 }
 
 - (void)webView:(WKWebView*)theWebView didFailProvisionalNavigation:(WKNavigation*)navigation withError:(NSError*)error
@@ -467,18 +544,11 @@ static void * KVOContext = &KVOContext;
         return YES;
     }
 
-    return NO;
+    return YES;
 }
 
 - (void) webView: (WKWebView *) webView decidePolicyForNavigationAction: (WKNavigationAction*) navigationAction decisionHandler: (void (^)(WKNavigationActionPolicy)) decisionHandler
 {
-    
-    NSLog(@"アクセスURL：%@", navigationAction.request.URL.absoluteString);
-        
-    // どのページも許可
-    return decisionHandler(WKNavigationActionPolicyAllow);
-    
-    
     NSURL* url = [navigationAction.request URL];
     CDVViewController* vc = (CDVViewController*)self.viewController;
 
@@ -552,8 +622,6 @@ static void * KVOContext = &KVOContext;
 
 - (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message
 {
-    NSLog(@"******** %@", [NSString stringWithFormat:@"%@", message.name]);
-    
     [self.scriptMessageHandler userContentController:userContentController didReceiveScriptMessage:message];
 }
 
